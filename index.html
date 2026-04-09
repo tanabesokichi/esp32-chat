@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>ESP32 Chat</title>
+</head>
+<body>
+
+<h2>ESP32 チャット</h2>
+
+<input type="text" id="msg" placeholder="メッセージ入力">
+<button onclick="sendMsg()">送信</button>
+
+<ul id="chat"></ul>
+
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyAC5HinJ-hMiNm5rdUFXtIsMnXNv5jyWYI",
+  databaseURL: "https://esp32-chat2-default-rtdb.asia-southeast1.firebasedatabase.app/"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+function sendMsg() {
+  const text = document.getElementById("msg").value;
+
+  const newRef = db.ref("chat").push(); // 自動ID
+  newRef.set({
+    text: text,
+    sender: "web"
+  });
+
+  document.getElementById("msg").value = "";
+}
+
+// リアルタイム受信
+db.ref("chat").on("child_added", snapshot => {
+  const data = snapshot.val();
+
+  const li = document.createElement("li");
+  li.textContent = data.sender + ": " + data.text;
+
+  document.getElementById("chat").appendChild(li);
+});
+</script>
+
+</body>
+</html>
