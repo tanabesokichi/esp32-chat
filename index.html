@@ -4,13 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
-<title>ESP32 Chat</title>
+<title>ESP32 Chat with Auth</title>
 
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="apple-touch-icon" href="icon.png">
 
 <style>
+/* スタイルはほぼ維持しつつ、ログインエリアを追加 */
 body {
   margin: 0;
   font-family: -apple-system;
@@ -25,6 +26,9 @@ header {
   background: #1e293b;
   padding: 12px;
   text-align: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 #chat {
@@ -55,6 +59,12 @@ header {
   align-self: flex-start;
 }
 
+.sender-name {
+  font-size: 10px;
+  margin-bottom: 4px;
+  font-weight: bold;
+}
+
 .time {
   font-size: 11px;
   opacity: 0.6;
@@ -70,6 +80,13 @@ header {
   display: flex;
   padding: 10px;
   background: #1e293b;
+  /* ログインしていない時は隠す */
+  display: none; 
+}
+
+#loginArea {
+  padding: 20px;
+  text-align: center;
 }
 
 input {
@@ -85,35 +102,85 @@ button {
   border-radius: 10px;
   background: #22c55e;
   border: none;
+  cursor: pointer;
+}
+
+.logout-btn {
+  background: #ef4444;
+  color: white;
+  font-size: 12px;
+  padding: 5px 10px;
 }
 </style>
 </head>
 
 <body>
 
-<header>ESP32 CHAT</header>
+<header>
+  <span>ESP32 CHAT</span>
+  <button id="outBtn" class="logout-btn" style="display:none;" onclick="logout()">ログアウト</button>
+</header>
+
+<div id="loginArea">
+  <p>チャットに参加するにはログインが必要です</p>
+  <button onclick="login()">Googleでログイン</button>
+</div>
+
 <div id="chat"></div>
 
 <div id="inputArea">
-  <input type="text" id="msg">
+  <input type="text" id="msg" placeholder="メッセージを入力...">
   <button onclick="sendMsg()">送信</button>
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
 
 <script>
+// 設定情報はあなたのものに書き換えてください
 const config = {
   apiKey: "AIzaSyAC5HinJ-hMiNm5rdUFXtIsMnXNv5jyWYI",
+  authDomain: "esp32-chat2.firebaseapp.com", // Authを使用する場合、この行が必要になることがあります
   databaseURL: "https://esp32-chat2-default-rtdb.asia-southeast1.firebasedatabase.app/"
 };
 
 firebase.initializeApp(config);
 const db = firebase.database();
+const auth = firebase.auth();
 
-const chat = document.getElementById("chat");
+let currentUser = null; // 現在ログインしているユーザー情報を保持する変数
 
-// ===== 時刻 =====
+// ===== 認証状態の監視 =====
+// ログインしているか、していないかを自動で判別して画面を切り替えます
+auth.onAuthStateChanged(user => {
+  if (user) {
+    // ログインしている場合
+    currentUser = user; // ユーザー情報を保存
+    document.getElementById("loginArea").style.display = "none"; // ログインボタンを隠す
+    document.getElementById("inputArea").style.display = "flex"; // 入力欄を表示
+    document.getElementById("outBtn").style.display = "block"; // ログアウトボタンを表示
+  } else {
+    // ログインしていない場合
+    currentUser = null;
+    document.getElementById("loginArea").style.display = "block"; // ログインボタンを表示
+    document.getElementById("inputArea").style.display = "none"; // 入力欄を隠す
+    document.getElementById("outBtn").style.display = "none"; // ログアウトボタンを隠す
+  }
+});
+
+// ===== ログイン処理 =====
+function login() {
+  const provider = new firebase.auth.GoogleAuthProvider(); // Google認証の準備
+  auth.signInWithPopup(provider).catch(err => alert(err.message)); // ポップアップでログイン
+}
+
+// ===== ログアウト処理 =====
+function logout() {
+  auth.signOut(); // ログアウト実行
+}
+
+// ===== 時刻フォーマット =====
 function formatTime(ts) {
   const d = new Date(ts);
   return d.getHours().toString().padStart(2,"0") + ":" +
@@ -122,20 +189,22 @@ function formatTime(ts) {
 
 // ===== 送信 =====
 function sendMsg() {
-  const text = msg.value;
-  if (!text) return;
+  const text = document.getElementById("msg").value; // 入力欄の値を取得
+  if (!text || !currentUser) return; // 空文字か未ログインなら何もしない
 
   db.ref("chat").push({
     text: text,
     sender: "web",
+    userName: currentUser.displayName, // Googleアカウントの表示名を保存
+    uid: currentUser.uid, // ユーザー固有のIDを保存（本人確認用）
     time: Date.now(),
     read: false
   });
 
-  msg.value = "";
+  document.getElementById("msg").value = ""; // 入力欄を空にする
 }
 
-// ===== 受信 =====
+// ===== 受信処理 =====
 db.ref("chat").on("child_added", snap => {
   const data = snap.val();
   const key = snap.key;
@@ -143,12 +212,53 @@ db.ref("chat").on("child_added", snap => {
   const div = document.createElement("div");
   div.classList.add("message");
 
-  if (data.sender === "web") {
-    div.classList.add("me");
+  // メッセージの振り分け（自分の発言かどうか）
+  // currentUserが存在し、かつUIDが一致すれば自分の発言
+  const isMe = (currentUser && data.uid === currentUser.uid);
 
-    // 長押し削除
+  if (isMe) {
+    div.classList.add("me");
+    // 長押し削除・編集のイベント（中身は以前と同じため省略可ですが、本人以外消せないようUIDチェックを入れると安全です）
+    addLongPressMenu(div, key, data);
+  } else {
+    div.classList.add("other");
+    if (data.sender !== "web") {
+        // ESP32など他者からの通知処理
+    }
+  }
+
+  // ユーザー名の表示（ESP32以外の場合に名前を出す）
+  const nameSpan = document.createElement("div");
+  nameSpan.classList.add("sender-name");
+  nameSpan.textContent = data.sender === "web" ? data.userName : "ESP32 Device";
+
+  const text = document.createElement("div");
+  text.textContent = data.text;
+
+  const time = document.createElement("div");
+  time.classList.add("time");
+  time.textContent = formatTime(data.time);
+
+  const status = document.createElement("div");
+  status.classList.add("status");
+  if (isMe) {
+    status.textContent = data.read ? "既読" : "未読";
+  }
+
+  div.appendChild(nameSpan);
+  div.appendChild(text);
+  div.appendChild(time);
+  div.appendChild(status);
+
+  document.getElementById("chat").appendChild(div);
+  const chatArea = document.getElementById("chat");
+  chatArea.scrollTop = chatArea.scrollHeight;
+});
+
+// 長押し機能の関数化
+function addLongPressMenu(el, key, data) {
     let timer;
-    div.addEventListener("touchstart", () => {
+    el.addEventListener("touchstart", () => {
       timer = setTimeout(() => {
         if (confirm("削除 or 編集する？\nOK=削除 / キャンセル=編集")) {
           db.ref("chat/" + key).remove();
@@ -160,52 +270,13 @@ db.ref("chat").on("child_added", snap => {
         }
       }, 600);
     });
+    el.addEventListener("touchend", () => clearTimeout(timer));
+}
 
-    div.addEventListener("touchend", () => clearTimeout(timer));
+// ===== 反映処理 =====
+db.ref("chat").on("child_removed", () => location.reload());
+db.ref("chat").on("child_changed", () => location.reload());
 
-  } else {
-    div.classList.add("other");
-
-    // 通知
-    if (Notification.permission === "granted") {
-      new Notification("新着", { body: data.text });
-    }
-
-    // 既読にする
-    db.ref("chat/" + key).update({ read: true });
-  }
-
-  const text = document.createElement("div");
-  text.textContent = data.text;
-
-  const time = document.createElement("div");
-  time.classList.add("time");
-  time.textContent = formatTime(data.time);
-
-  const status = document.createElement("div");
-  status.classList.add("status");
-
-  if (data.sender === "web") {
-    status.textContent = data.read ? "既読" : "未読";
-  }
-
-  div.appendChild(text);
-  div.appendChild(time);
-  div.appendChild(status);
-
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-});
-
-// ===== 削除反映 =====
-db.ref("chat").on("child_removed", snap => {
-  location.reload();
-});
-
-// ===== 編集反映 =====
-db.ref("chat").on("child_changed", snap => {
-  location.reload();
-});
 </script>
 
 </body>
