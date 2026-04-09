@@ -2,29 +2,35 @@
 <html>
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+
 <title>ESP32 Chat</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ESP32 Chat">
+<link rel="apple-touch-icon" href="icon.png">
 
 <style>
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont;
-  background: #0f172a; /* 落ち着いたダーク */
+  background: #0f172a;
   color: white;
   display: flex;
   flex-direction: column;
   height: 100vh;
 }
 
-/* ヘッダー */
 header {
   background: #1e293b;
   padding: 15px;
   text-align: center;
   font-weight: bold;
-  font-size: 18px;
 }
 
-/* チャットエリア */
 #chat {
   flex: 1;
   overflow-y: auto;
@@ -33,29 +39,38 @@ header {
   flex-direction: column;
 }
 
-/* 吹き出し */
 .message {
   max-width: 70%;
-  padding: 10px 14px;
-  margin: 6px 0;
+  padding: 10px;
+  margin: 5px 0;
   border-radius: 16px;
-  font-size: 15px;
+  display: flex;
+  flex-direction: column;
 }
 
-/* 相手 */
-.other {
-  background: #334155;
-  align-self: flex-start;
-}
-
-/* 自分 */
 .me {
   background: #22c55e;
   color: black;
   align-self: flex-end;
 }
 
-/* 入力エリア */
+.other {
+  background: #334155;
+  align-self: flex-start;
+}
+
+/* 時刻 */
+.time {
+  font-size: 11px;
+  opacity: 0.6;
+  margin-top: 4px;
+  text-align: right;
+}
+
+.other .time {
+  text-align: left;
+}
+
 #inputArea {
   display: flex;
   padding: 10px;
@@ -67,17 +82,14 @@ input {
   padding: 10px;
   border-radius: 10px;
   border: none;
-  outline: none;
 }
 
 button {
   margin-left: 10px;
-  padding: 10px 15px;
-  border: none;
+  padding: 10px;
   border-radius: 10px;
   background: #22c55e;
-  color: black;
-  font-weight: bold;
+  border: none;
 }
 </style>
 </head>
@@ -98,12 +110,26 @@ button {
 
 <script>
 const firebaseConfig = {
-  apiKey: "AIzaSyAC5HinJ-hMiNm5rdUFXtIsMnXNv5jyWYI",
+  apiKey: "AIzaSyAC5HinJ-hMiNm5rdUFXtIsMnv5jyWYI",
   databaseURL: "https://esp32-chat2-default-rtdb.asia-southeast1.firebasedatabase.app/"
 };
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
+
+let lastMessage = "";
+
+// 通知許可
+if (Notification.permission !== "granted") {
+  Notification.requestPermission();
+}
+
+// ===== 時刻フォーマット =====
+function formatTime(ts) {
+  const d = new Date(ts);
+  return d.getHours().toString().padStart(2, '0') + ":" +
+         d.getMinutes().toString().padStart(2, '0');
+}
 
 // ===== 送信 =====
 function sendMsg() {
@@ -112,7 +138,8 @@ function sendMsg() {
 
   db.ref("chat").push({
     text: text,
-    sender: "web"
+    sender: "web",
+    time: Date.now() // ← ここが追加ポイント
   });
 
   document.getElementById("msg").value = "";
@@ -129,14 +156,30 @@ db.ref("chat").on("child_added", snapshot => {
     div.classList.add("me");
   } else {
     div.classList.add("other");
+
+    // 通知
+    if (data.text !== lastMessage) {
+      new Notification("新着メッセージ", {
+        body: data.text
+      });
+      lastMessage = data.text;
+    }
   }
 
-  div.textContent = data.text;
+  // メッセージ本文
+  const text = document.createElement("div");
+  text.textContent = data.text;
+
+  // 時刻
+  const time = document.createElement("div");
+  time.classList.add("time");
+  time.textContent = formatTime(data.time || Date.now());
+
+  div.appendChild(text);
+  div.appendChild(time);
 
   const chat = document.getElementById("chat");
   chat.appendChild(div);
-
-  // 自動スクロール
   chat.scrollTop = chat.scrollHeight;
 });
 </script>
